@@ -1,232 +1,277 @@
 ## DevOps Project 05 — Docker Swarm Orchestration (React + FastAPI + MongoDB)
 
-This project demonstrates a simple, production-ready ToDo application orchestrated with Docker Swarm:
+This repository contains a simple ToDo application demonstrating containerization and orchestration with Docker Swarm:
 
-- frontend: React (Create React App)
-- backend: FastAPI served by Uvicorn
-- database: MongoDB
+- **Frontend**: React app served on port 3000
+- **Backend**: FastAPI service served on port 8000
+- **Database**: MongoDB 6 with a persistent volume
 
-The stack is packaged for local development and container orchestration with Docker Swarm, including rolling updates, restart policies, overlay networking, and persistent storage for MongoDB.
+The stack is defined in `docker-stack.yml` and uses Swarm primitives such as services, replicas, rolling updates, secrets, configs, overlay networks, and volumes.
 
----
+### Repository Structure
+
+- `frontend/`: React application, `Dockerfile`, `package.json`
+- `backend/`: FastAPI application, `Dockerfile`, `requirements.txt`, `main.py`
+- `docker-stack.yml`: Swarm stack definition
 
 ### Architecture
 
-- **Frontend (`frontend/`)**
-  - React app served on port 3000
-  - Uses `REACT_APP_API_BASE_URL` to target the backend API (defaults to `http://localhost:8000` in dev)
-
-- **Backend (`backend/`)**
-  - FastAPI application exposing a CRUD ToDo API on port 8000
-  - Connects to MongoDB via `MONGODB_URL` environment variable
-  - Models: `TodoItem`, `TodoUpdate`, `TodoResponse`
-
-- **Database**
-  - MongoDB 6 with named volume `mongo_data` for persistence
-
-- **Orchestration (`docker-stack.yml`)**
-  - 3 services: `frontend`, `backend`, `mongo`
-  - Overlay network: `app-network`
-  - Rolling update and restart policies defined for stateless services
-  - Named volume `mongo_data` for MongoDB data
-
----
-
-### Tech Stack
-
-- React 18, Axios
-- FastAPI, Uvicorn, Pydantic, PyMongo
-- MongoDB 6
-- Docker, Docker Swarm
-
----
-
-### API Overview (FastAPI)
-
-Base URL: `http://<backend-host>:8000`
-
-- `GET /` → health/info
-- `GET /todos` → list all todos
-- `POST /todos` → create todo
-- `GET /todos/{id}` → get todo by id
-- `PUT /todos/{id}` → update todo (partial update supported)
-- `DELETE /todos/{id}` → delete todo
-
-Example payloads:
-
-```json
-// POST /todos
-{
-  "title": "Write docs",
-  "description": "Create README for swarm project"
-}
+```
+┌────────────┐      HTTP      ┌────────────┐        TCP        ┌───────────┐
+│  Frontend  │ 3000 -> 3000   │  Backend   │ 8000 -> 8000      │  MongoDB   │
+│ (React)    │ ─────────────▶ │ (FastAPI)  │ ────────────────▶ │ (mongo:6) │
+└────────────┘                 └────────────┘                    └───────────┘
+         \________________________ overlay network: `app-network` ______________________/
 ```
 
-```json
-// PUT /todos/{id}
-{
-  "completed": true
-}
-```
+### Key Features for DevOps
+
+- **Swarm-ready** with `replicas`, `update_config` (start-first), `rollback_config`, and `restart_policy`
+- **Secrets and Configs**: `mongo_user`, `mongo_pass`, and `backend_config` declared as externals
+- **Persistent storage** with `mongo_data` volume
+- **Overlay network** for inter-service communication
+- **Declarative deployment** via `docker stack deploy`
 
 ---
 
-### Local Development (no Docker)
+## Prerequisites
 
-Prerequisites: Node 18+, Python 3.11+, local MongoDB (or Atlas connection string)
+- Docker Engine 20.10+ with Swarm mode enabled
+- Access to build or pull images referenced in `docker-stack.yml`:
+  - `iammahendravarma20/todofrontend:v1`
+  - `iammahendravarma20/todobackend:v1`
 
-1) Backend
+If you intend to build locally and push your own images, ensure you have a container registry (e.g., Docker Hub, GHCR) and are logged in.
+
+---
+
+## Configuration, Secrets, and Environment
+
+The stack expects the following external objects to exist in Swarm:
+
+- Secrets: `mongo_user`, `mongo_pass`
+- Configs: `backend_config`
+
+Create them before deploying:
 
 ```bash
-cd backend
-python -m venv .venv && .venv\\Scripts\\activate   # Windows PowerShell
-pip install -r requirements.txt
-
-# Configure Mongo connection
-copy env.example .env   # ensure MONGODB_URL is set
-
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-2) Frontend
-
-```bash
-cd frontend
-npm install
-# optional: to point to a non-default API host
-# set REACT_APP_API_BASE_URL=http://localhost:8000
-npm start
-```
-
-The CRA dev server proxies API calls to `http://localhost:8000` (see `package.json`), and the app default also targets `http://localhost:8000` unless `REACT_APP_API_BASE_URL` is defined.
-
----
-
-### Container Images (prebuilt)
-
-The stack file references these images:
-
-- frontend: `iammahendravarma20/todofrontend:v1`
-- backend: `iammahendravarma20/todobackend:v1`
-- database: `mongo:6`
-
-You can replace these with locally built images if needed.
-
----
-
-### Build Images Locally (optional)
-
-1) Backend
-
-```bash
-cd backend
-docker build -t todobackend:local .
-```
-
-2) Frontend
-
-```bash
-cd frontend
-docker build -t todofrontend:local .
-```
-
-Then update `docker-stack.yml` to use your `:local` tags.
-
----
-
-### Docker Swarm Deployment
-
-Prerequisites: Docker Desktop (or Docker Engine) with Swarm initialized
-
-```bash
-# Initialize swarm (if not already)
+# Initialize Swarm (if not already)
 docker swarm init
 
-# Create overlay network and volume are handled by the stack; create secrets/configs first if needed
+# Create secrets (examples)
+printf "mongo" | docker secret create mongo_user -
+printf "mongo_password" | docker secret create mongo_pass -
 
-# Create required external secrets referenced in docker-stack.yml
-echo "your-mongo-username" | docker secret create mongo_user -
-echo "your-mongo-password" | docker secret create mongo_pass -
+# Create a dummy config for the backend
+printf "BACKEND_CONFIG_VERSION=1" | docker config create backend_config -
+```
 
-# Create an external config referenced by backend (contents optional/demo)
-echo "BACKEND_CONFIG=demo" | docker config create backend_config -
+Environment variables:
 
-# Deploy the stack (uses the repo folder name as stack name by default below)
+- The backend reads MongoDB URI from `MONGODB_URL` (see `backend/main.py`).
+- In `docker-stack.yml`, the backend service currently sets `MONGO_URI=mongodb://mongo:27017/devopsdb`.
+
+To avoid confusion, you should align the variable names one of two ways:
+
+1) Change the stack to export `MONGODB_URL` instead of `MONGO_URI`, or
+2) Update the backend code to read `MONGO_URI`.
+
+Example (recommended) change in stack:
+
+```yaml
+environment:
+  - MONGODB_URL=mongodb://mongo:27017/devopsdb
+```
+
+Frontend API base URL:
+
+- The React app uses `REACT_APP_API_BASE_URL` if provided, otherwise defaults to `http://localhost:8000`.
+- When running in Swarm, expose backend on a published port or ensure the frontend calls the backend via an ingress route/reverse proxy.
+
+---
+
+## Build Images (Optional, if you want to use your own registry)
+
+```bash
+# Backend
+docker build -t <your-registry>/todobackend:v1 ./backend
+docker push <your-registry>/todobackend:v1
+
+# Frontend
+docker build -t <your-registry>/todofrontend:v1 ./frontend
+docker push <your-registry>/todofrontend:v1
+
+# Update docker-stack.yml to use your images
+```
+
+---
+
+## Deploy to Docker Swarm
+
+```bash
+# 1) Initialize Swarm (if not already)
+docker swarm init
+
+# 2) Create required secrets/configs (see section above)
+
+# 3) Deploy the stack
 docker stack deploy -c docker-stack.yml todoapp
 
-# Verify
+# 4) Check status
 docker stack services todoapp
 docker service ls
+docker service ps todoapp_frontend
 docker service ps todoapp_backend
+docker service ps todoapp_mongo
 ```
 
 Access:
 
 - Frontend: `http://localhost:3000`
-- Backend: `http://localhost:8000`
+- Backend: If you expose/publish port 8000, it will be reachable at `http://localhost:8000`
+
+Note: The provided `docker-stack.yml` maps `3000:3000` for the frontend. The backend is reachable inside the overlay network at `http://backend:8000` (service name) and by other services (e.g., frontend) if configured to call it via that address. For browser-based calls from the frontend, consider publishing backend port 8000 or fronting with a reverse proxy.
 
 ---
 
-### Important Notes about Environment Variables
+## Scaling and Rolling Updates
 
-- The backend code uses `MONGODB_URL` (default `mongodb://localhost:27017`). In `docker-stack.yml`, the backend service currently sets `MONGO_URI`. To ensure connectivity in Swarm, use at least one of the following:
-  - Update the stack to set `MONGODB_URL=mongodb://mongo:27017/devopsdb` for the backend service, or
-  - Update the backend image/code to read `MONGO_URI` instead of `MONGODB_URL`.
+Scale services:
 
-- The `mongo_user` and `mongo_pass` secrets are referenced in the stack but not actively consumed by `mongo:6` or the backend as environment variables. If you need auth:
-  - Configure Mongo with environment variables (`MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`) or an init script that reads the secrets from `/run/secrets/...`.
-  - Update the backend connection string to include credentials.
-
-- The `backend_config` Docker config is referenced but not used in code. You can remove it from the stack or mount and read it from the backend if you plan to leverage Docker configs.
-
----
-
-### Troubleshooting
-
-- Backend cannot connect to Mongo in Swarm:
-  - Ensure the env var mismatch is resolved: set `MONGODB_URL` in the backend service to `mongodb://mongo:27017/devopsdb`.
-  - Check network: services must share `app-network`.
-  - Confirm Mongo is healthy: `docker service logs todoapp_mongo`.
-
-- Frontend shows error fetching todos:
-  - Ensure backend is reachable from your browser at `http://localhost:8000`.
-  - In Swarm, if you customized ports, update `REACT_APP_API_BASE_URL` accordingly and rebuild the frontend image.
-
----
-
-### Repository Structure
-
+```bash
+docker service scale todoapp_frontend=4
+docker service scale todoapp_backend=4
 ```
-DevOps-Project-05-Docker-Swarm-Orchestration/
-  docker-stack.yml         # Swarm stack with services, networks, volumes, secrets, configs
-  backend/
-    Dockerfile             # Python 3.11-slim + Uvicorn
-    requirements.txt       # FastAPI, Uvicorn, PyMongo, etc.
-    env.example            # Example for MONGODB_URL
-    main.py                # FastAPI app with CRUD endpoints
-  frontend/
-    Dockerfile             # Node 18-alpine
-    package.json           # CRA scripts + proxy config
-    public/index.html
-    src/App.js             # UI + Axios calls to API
-    src/index.js
-    src/index.css
+
+Rolling update (e.g., update image tag):
+
+```bash
+docker service update \
+  --image <your-registry>/todobackend:v2 \
+  --update-order start-first \
+  --update-parallelism 1 \
+  --update-delay 10s \
+  todoapp_backend
+```
+
+Rollback if needed:
+
+```bash
+docker service rollback todoapp_backend
 ```
 
 ---
 
-### Roadmap / Improvements
+## Persistence
 
-- Align env var naming between stack and backend (`MONGODB_URL` vs `MONGO_URI`).
-- Wire Docker secrets to Mongo credentials and backend connection string.
-- Add healthchecks to services in `docker-stack.yml`.
-- Add production-ready frontend build serving (e.g., Nginx) instead of CRA dev server image.
-- CI/CD pipeline to build and push images, then update Swarm with rolling updates.
+MongoDB uses a named volume `mongo_data` mounted to `/data/db`. This ensures data persists across container restarts on the same node. For production-grade setups, consider:
+
+- Swarm-aware storage providers (NFS, Portworx, Longhorn, etc.)
+- Backups and point-in-time recovery
 
 ---
 
-### License
+## Local Development (without Swarm)
 
-MIT or project-specific; add your preferred license here.
+Backend (FastAPI):
+
+```bash
+cd backend
+python -m venv .venv && . .venv/bin/activate  # PowerShell: .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# Ensure MongoDB is available locally or via container
+export MONGODB_URL="mongodb://localhost:27017"  # PowerShell: $env:MONGODB_URL="mongodb://localhost:27017"
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Frontend (React):
+
+```bash
+cd frontend
+npm install
+
+# Optionally point to a non-default backend
+# PowerShell example:
+$env:REACT_APP_API_BASE_URL="http://localhost:8000"
+npm start
+```
+
+---
+
+## Observability and Logs
+
+Inspect logs:
+
+```bash
+docker service logs -f todoapp_frontend
+docker service logs -f todoapp_backend
+docker service logs -f todoapp_mongo
+```
+
+Health and tasks:
+
+```bash
+docker service ps todoapp_backend --no-trunc
+docker node ls
+docker node ps <node-id>
+```
+
+For production, integrate with:
+
+- Centralized logging (e.g., EFK/ELK, Loki)
+- Metrics (Prometheus + Grafana)
+- Tracing (OpenTelemetry)
+
+---
+
+## Security Notes
+
+- Use Swarm secrets for credentials; avoid plain env vars for sensitive data
+- Restrict MongoDB to internal network only
+- Consider network policies (segmentation) and a reverse proxy with TLS termination (Traefik, Nginx) for public endpoints
+
+---
+
+## Troubleshooting
+
+- Backend cannot reach MongoDB:
+  - Verify the environment variable name matches the code (`MONGODB_URL`)
+  - Ensure service DNS name `mongo` resolves inside the overlay network
+  - Check Mongo logs: `docker service logs todoapp_mongo`
+
+- Frontend cannot reach Backend from browser:
+  - Ensure backend port 8000 is published or route via a reverse proxy
+  - Set `REACT_APP_API_BASE_URL` to a reachable host:port
+
+- Service stuck in restart loop:
+  - Inspect `docker service ps` and `docker service logs`
+  - Validate secrets/configs exist and are referenced correctly
+
+---
+
+## API Endpoints (Backend)
+
+- `GET /` → health message
+- `GET /todos` → list todos
+- `POST /todos` → create todo
+- `GET /todos/{id}` → fetch single todo
+- `PUT /todos/{id}` → update todo
+- `DELETE /todos/{id}` → delete todo
+
+---
+
+## Notes on Improvements
+
+- Align env var names between stack and backend (`MONGODB_URL` vs `MONGO_URI`)
+- Publish backend port in `docker-stack.yml` or add an ingress proxy
+- Add CI/CD (build, scan, push images, deploy stack)
+- Add healthchecks to services for faster failure detection
+
+---
+
+## License
+
+MIT (or your preferred license)
 
 
