@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './index.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000';;
-
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://backend:8000/'
 function App() {
   const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(true);
