@@ -1,0 +1,74 @@
+version: "3.8"
+
+services:
+  frontend:
+    image: iammahendravarma20/todofrontend:v1
+    ports:
+      - "3000:3000"
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      rollback_config:
+        parallelism: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - app-network
+
+  backend:
+    image: iammahendravarma20/todobackend:v1
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/devopsdb
+    secrets:
+      - mongo_user
+      - mongo_pass
+    configs:
+      - backend_config
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+      rollback_config:
+        parallelism: 1
+      restart_policy:
+        condition: on-failure
+    networks:
+      - app-network
+    depends_on:
+      - mongo
+
+  mongo:
+    image: mongo:6
+    volumes:
+      - mongo_data:/data/db
+    secrets:
+      - mongo_user
+      - mongo_pass
+    deploy:
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+    networks:
+      - app-network
+
+volumes:
+  mongo_data:
+
+secrets:
+  mongo_user:
+    external: true
+  mongo_pass:
+    external: true
+
+configs:
+  backend_config:
+    external: true
+
+networks:
+  app-network:
+    driver: overlay
