@@ -3,6 +3,8 @@ version: "3.8"
 services:
   frontend:
     image: iammahendravarma20/todofrontend:v1
+    environment:
+      - REACT_APP_API_URL=http://54.90.226.236:8000
     ports:
       - "3000:3000"
     deploy:
